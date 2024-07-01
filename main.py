@@ -1,10 +1,13 @@
 import streamlit as st
 import pandas as pd
 from io import BytesIO
+import datetime
 
 st.set_page_config(page_title="100 dias.", page_icon=":tada:")
 
 st.title(":tada:100 dias de HOJE!")
+
+hoje = datetime.date.today().strftime(r"%d/%m/%Y")
 
 def load_excel(file):
     return pd.read_excel(file)
@@ -53,7 +56,7 @@ def main():
         excel_data = convert_df_to_excel(result_df)
         st.download_button(label='Download da Planilha Comparada',
                            data=excel_data,
-                           file_name='planilha_comparada.xlsx',
+                           file_name=f'planilha_100dias_comparada_{hoje}.xlsx',
                            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 if __name__ == '__main__':
