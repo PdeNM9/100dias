@@ -51,12 +51,9 @@ if uploaded_file_completa is not None and uploaded_file_filtro is not None:
         df_completa_original = pd.read_excel(uploaded_file_completa)
         df_filtro_atualizada = pd.read_excel(uploaded_file_filtro)
 
-        # Garante que a coluna 'OBSERVAÇÃO' na planilha original seja tratada como texto.
-        if 'OBSERVAÇÃO' in df_completa_original.columns:
-            df_completa_original['OBSERVAÇÃO'] = df_completa_original['OBSERVAÇÃO'].fillna('').astype(str)
-        # Garante que a coluna 'PAR OU ÍMPAR' na planilha original seja tratada como texto (boa prática).
-        if 'PAR OU ÍMPAR' in df_completa_original.columns:
-            df_completa_original['PAR OU ÍMPAR'] = df_completa_original['PAR OU ÍMPAR'].fillna('').astype(str)
+        # --- MELHORIA: Normalizar nomes das colunas para maior robustez ---
+        df_completa_original.columns = [col.strip().upper() for col in df_completa_original.columns]
+        df_filtro_atualizada.columns = [col.strip().upper() for col in df_filtro_atualizada.columns]
 
 
         if 'PROCESSO' not in df_completa_original.columns or 'PROCESSO' not in df_filtro_atualizada.columns:
@@ -64,52 +61,54 @@ if uploaded_file_completa is not None and uploaded_file_filtro is not None:
         else:
             st.success("Planilhas carregadas com sucesso! Iniciando a comparação...")
 
-            # --- Identificação de Processos ---
-            set_processos_completa = set(df_completa_original['PROCESSO'].astype(str).unique())
-            set_processos_filtro = set(df_filtro_atualizada['PROCESSO'].astype(str).unique())
+            # --- MELHORIA: Normalizar dados da coluna 'PROCESSO' ---
+            df_completa_original['PROCESSO'] = df_completa_original['PROCESSO'].astype(str).str.strip()
+            df_filtro_atualizada['PROCESSO'] = df_filtro_atualizada['PROCESSO'].astype(str).str.strip()
 
-            # Processos que foram despachados (estavam na original, mas não estão mais no filtro)
+            # Garante que a coluna 'OBSERVAÇÃO' na planilha original seja tratada como texto.
+            if 'OBSERVAÇÃO' in df_completa_original.columns:
+                df_completa_original['OBSERVAÇÃO'] = df_completa_original['OBSERVAÇÃO'].fillna('').astype(str)
+            # Garante que a coluna 'PAR OU ÍMPAR' na planilha original seja tratada como texto (boa prática).
+            if 'PAR OU ÍMPAR' in df_completa_original.columns:
+                df_completa_original['PAR OU ÍMPAR'] = df_completa_original['PAR OU ÍMPAR'].fillna('').astype(str)
+
+            # --- Identificação de Processos ---
+            set_processos_completa = set(df_completa_original['PROCESSO'].unique())
+            set_processos_filtro = set(df_filtro_atualizada['PROCESSO'].unique())
+
             processos_removidos = set_processos_completa - set_processos_filtro
             qtd_despachados = len(processos_removidos)
 
-            # Processos novos (estão no filtro, mas não estavam na planilha original)
             processos_novos_identificados = set_processos_filtro - set_processos_completa
             qtd_novos = len(processos_novos_identificados)
 
-            # --- ALTERAÇÃO NA LÓGICA DE CRIAÇÃO DA DF_FINAL ---
+            # --- Lógica de Criação da DF_FINAL (Está correta) ---
 
             # 1. Processos da planilha completa que AINDA ESTÃO na planilha de filtro/atualizada
-            # Estes mantêm todos os dados da planilha completa original.
             df_mantidos_com_dados_completos = df_completa_original[
-                df_completa_original['PROCESSO'].astype(str).isin(set_processos_filtro)
+                df_completa_original['PROCESSO'].isin(set_processos_filtro)
             ].copy()
 
-            # 2. Processos que são NOVOS (estão na filtro/atualizada, mas não na completa original)
-            # Vamos pegar os dados desses processos da planilha de filtro/atualizada.
-            # As colunas 'PAR OU ÍMPAR' e 'OBSERVAÇÃO' não existem aqui.
+            # 2. Processos que são NOVOS (estão no filtro/atualizada, mas não na completa original)
             df_novos_para_adicionar = df_filtro_atualizada[
-                df_filtro_atualizada['PROCESSO'].astype(str).isin(processos_novos_identificados)
+                df_filtro_atualizada['PROCESSO'].isin(processos_novos_identificados)
             ].copy()
 
             # 3. Concatenar os dois DataFrames
-            # pd.concat vai alinhar pelas colunas.
-            # As colunas 'PAR OU ÍMPAR' e 'OBSERVAÇÃO' existirão em df_mantidos_com_dados_completos.
-            # Elas NÃO existirão em df_novos_para_adicionar.
-            # Ao concatenar, o pandas preencherá essas colunas com NaN (Not a Number) para as linhas
-            # vindas de df_novos_para_adicionar.
             df_final = pd.concat([df_mantidos_com_dados_completos, df_novos_para_adicionar], ignore_index=True, sort=False)
 
             # 4. Ajuste Pós-Concatenação para as colunas extras
-            # Garante que as colunas 'PAR OU ÍMPAR' e 'OBSERVAÇÃO' em df_final sejam strings
-            # e que os NaN (dos novos processos) se tornem strings vazias.
             colunas_extras = ['PAR OU ÍMPAR', 'OBSERVAÇÃO']
             for col in colunas_extras:
-                if col in df_final.columns: # Se a coluna existe no df_final
+                if col in df_final.columns:
                     df_final[col] = df_final[col].fillna('').astype(str)
-                # else: # Se a coluna não existir (ex: df_completa_original não tinha)
-                      # podemos criá-la com strings vazias, se desejado para consistência
-                      # df_final[col] = ''
-            # --- FIM DA ALTERAÇÃO NA LÓGICA DE CRIAÇÃO DA DF_FINAL ---
+                else: # Se a coluna não existia na original, cria como vazia para consistência
+                    df_final[col] = ''
+
+            # --- MELHORIA: Adicionar ordenação ao resultado final ---
+            # Reordena o dataframe final com base na coluna PROCESSO para um resultado mais limpo
+            if 'PROCESSO' in df_final.columns:
+                df_final = df_final.sort_values(by='PROCESSO').reset_index(drop=True)
 
             # --- Exibição dos Resultados ---
             st.header("2. Resultados da Comparação")
@@ -118,24 +117,23 @@ if uploaded_file_completa is not None and uploaded_file_filtro is not None:
             col_metric1.metric("Total de Processos na Planilha Original", len(set_processos_completa))
             col_metric2.metric("Total de Processos na Planilha de Filtro/Atualizada", len(set_processos_filtro))
             col_metric3.metric(
-                label="Processos Despachados (Removidos da Original)",
+                label="Processos Despachados (Removidos)",
                 value=qtd_despachados,
-                help="Processos que estavam na planilha original mas não estão na planilha de filtro/atualizada."
+                help="Processos que estavam na planilha original mas não estão na de filtro."
             )
             col_metric4.metric(
-                label="Novos Processos (Adicionados ao Filtro)",
+                label="Novos Processos (Adicionados)",
                 value=qtd_novos,
-                help="Processos que estão na planilha de filtro/atualizada mas não estavam na planilha original."
+                help="Processos que estão na planilha de filtro mas não estavam na original."
             )
 
-            # A quantidade total na planilha final agora deve ser igual à quantidade da planilha de filtro.
             st.metric("Total de Processos na Planilha Final (Resultado)", len(df_final))
 
             # --- Download da Planilha Final ---
             st.header("3. Download do Resultado")
             excel_data = to_excel(df_final)
             data_hoje = date.today().strftime("%Y-%m-%d") 
-            nome_arquivo_final = f"planilha_final_comparada_com_novos_{data_hoje}.xlsx"
+            nome_arquivo_final = f"planilha_final_comparada_{data_hoje}.xlsx"
 
             st.download_button(
                 label="📥 Baixar Planilha Final em XLSX",
@@ -145,9 +143,9 @@ if uploaded_file_completa is not None and uploaded_file_filtro is not None:
             )
 
             with st.expander("Ver pré-visualização da planilha final (primeiras 100 linhas)"):
-                st.dataframe(df_final.head(100)) # Mostra apenas as primeiras 100 para performance
+                st.dataframe(df_final.head(100))
 
     except Exception as e:
         st.error(f"Ocorreu um erro ao processar os arquivos: {e}")
-        st.exception(e) # Mostra o traceback completo no log do Streamlit
+        st.exception(e)
         st.warning("Verifique se os arquivos estão no formato XLSX correto e não estão corrompidos. Verifique também se a coluna 'PROCESSO' existe em ambas.")
