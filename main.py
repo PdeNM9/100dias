@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import io
+import requests
 from datetime import date
 
 # --- Configuração da Página ---
@@ -18,6 +19,19 @@ def to_excel(df):
         df.to_excel(writer, index=False, sheet_name='Resultado')
     processed_data = output.getvalue()
     return processed_data
+
+# --- Função para notificar n8n ---
+def notificar_n8n(nome_arquivo, qtd_processos):
+    url = "https://SEU_N8N_DOMAIN/webhook/streamlit-botao"  # 🔹 altere para o seu endpoint do n8n
+    payload = {
+        "mensagem": "Planilha final baixada no site",
+        "arquivo": nome_arquivo,
+        "total_processos": qtd_processos
+    }
+    try:
+        requests.post(url, json=payload, timeout=10)
+    except Exception as e:
+        st.warning(f"⚠️ Não foi possível notificar o n8n: {e}")
 
 # --- Título e Descrição do Aplicativo ---
 st.title("📊 Comparador de Planilhas de Processos")
@@ -51,24 +65,21 @@ if uploaded_file_completa is not None and uploaded_file_filtro is not None:
         df_completa_original = pd.read_excel(uploaded_file_completa)
         df_filtro_atualizada = pd.read_excel(uploaded_file_filtro)
 
-        # --- MELHORIA: Normalizar nomes das colunas para maior robustez ---
+        # --- Normalização das colunas ---
         df_completa_original.columns = [col.strip().upper() for col in df_completa_original.columns]
         df_filtro_atualizada.columns = [col.strip().upper() for col in df_filtro_atualizada.columns]
-
 
         if 'PROCESSO' not in df_completa_original.columns or 'PROCESSO' not in df_filtro_atualizada.columns:
             st.error("Erro: A coluna 'PROCESSO' não foi encontrada em uma ou ambas as planilhas. Verifique os arquivos.")
         else:
             st.success("Planilhas carregadas com sucesso! Iniciando a comparação...")
 
-            # --- MELHORIA: Normalizar dados da coluna 'PROCESSO' ---
+            # --- Normalização dos dados ---
             df_completa_original['PROCESSO'] = df_completa_original['PROCESSO'].astype(str).str.strip()
             df_filtro_atualizada['PROCESSO'] = df_filtro_atualizada['PROCESSO'].astype(str).str.strip()
 
-            # Garante que a coluna 'OBSERVAÇÃO' na planilha original seja tratada como texto.
             if 'OBSERVAÇÃO' in df_completa_original.columns:
                 df_completa_original['OBSERVAÇÃO'] = df_completa_original['OBSERVAÇÃO'].fillna('').astype(str)
-            # Garante que a coluna 'PAR OU ÍMPAR' na planilha original seja tratada como texto (boa prática).
             if 'PAR OU ÍMPAR' in df_completa_original.columns:
                 df_completa_original['PAR OU ÍMPAR'] = df_completa_original['PAR OU ÍMPAR'].fillna('').astype(str)
 
@@ -82,52 +93,36 @@ if uploaded_file_completa is not None and uploaded_file_filtro is not None:
             processos_novos_identificados = set_processos_filtro - set_processos_completa
             qtd_novos = len(processos_novos_identificados)
 
-            # --- Lógica de Criação da DF_FINAL (Está correta) ---
-
-            # 1. Processos da planilha completa que AINDA ESTÃO na planilha de filtro/atualizada
+            # --- Criação da DF Final ---
             df_mantidos_com_dados_completos = df_completa_original[
                 df_completa_original['PROCESSO'].isin(set_processos_filtro)
             ].copy()
 
-            # 2. Processos que são NOVOS (estão no filtro/atualizada, mas não na completa original)
             df_novos_para_adicionar = df_filtro_atualizada[
                 df_filtro_atualizada['PROCESSO'].isin(processos_novos_identificados)
             ].copy()
 
-            # 3. Concatenar os dois DataFrames
             df_final = pd.concat([df_mantidos_com_dados_completos, df_novos_para_adicionar], ignore_index=True, sort=False)
 
-            # 4. Ajuste Pós-Concatenação para as colunas extras
             colunas_extras = ['PAR OU ÍMPAR', 'OBSERVAÇÃO']
             for col in colunas_extras:
                 if col in df_final.columns:
                     df_final[col] = df_final[col].fillna('').astype(str)
-                else: # Se a coluna não existia na original, cria como vazia para consistência
+                else:
                     df_final[col] = ''
 
-            # --- MELHORIA: Adicionar ordenação ao resultado final ---
-            # Reordena o dataframe final com base na coluna PROCESSO para um resultado mais limpo
             if 'PROCESSO' in df_final.columns:
                 df_final = df_final.sort_values(by='PROCESSO').reset_index(drop=True)
 
-            # --- Exibição dos Resultados ---
+            # --- Exibição ---
             st.header("2. Resultados da Comparação")
-            st.subheader("Quadro Comparativo")
             col_metric1, col_metric2, col_metric3, col_metric4 = st.columns(4)
-            col_metric1.metric("Total de Processos na Planilha Original", len(set_processos_completa))
-            col_metric2.metric("Total de Processos na Planilha de Filtro/Atualizada", len(set_processos_filtro))
-            col_metric3.metric(
-                label="Processos Despachados (Removidos)",
-                value=qtd_despachados,
-                help="Processos que estavam na planilha original mas não estão na de filtro."
-            )
-            col_metric4.metric(
-                label="Novos Processos (Adicionados)",
-                value=qtd_novos,
-                help="Processos que estão na planilha de filtro mas não estavam na original."
-            )
+            col_metric1.metric("Total Original", len(set_processos_completa))
+            col_metric2.metric("Total Atualizada", len(set_processos_filtro))
+            col_metric3.metric("Removidos", qtd_despachados)
+            col_metric4.metric("Novos", qtd_novos)
 
-            st.metric("Total de Processos na Planilha Final (Resultado)", len(df_final))
+            st.metric("Total na Planilha Final", len(df_final))
 
             # --- Download da Planilha Final ---
             st.header("3. Download do Resultado")
@@ -135,12 +130,16 @@ if uploaded_file_completa is not None and uploaded_file_filtro is not None:
             data_hoje = date.today().strftime("%Y-%m-%d") 
             nome_arquivo_final = f"planilha_final_comparada_{data_hoje}.xlsx"
 
-            st.download_button(
+            clicked = st.download_button(
                 label="📥 Baixar Planilha Final em XLSX",
                 data=excel_data,
                 file_name=nome_arquivo_final,
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
+
+            # 🔹 Dispara a notificação quando o download é clicado
+            if clicked:
+                notificar_n8n(nome_arquivo_final, len(df_final))
 
             with st.expander("Ver pré-visualização da planilha final (primeiras 100 linhas)"):
                 st.dataframe(df_final.head(100))
@@ -148,4 +147,4 @@ if uploaded_file_completa is not None and uploaded_file_filtro is not None:
     except Exception as e:
         st.error(f"Ocorreu um erro ao processar os arquivos: {e}")
         st.exception(e)
-        st.warning("Verifique se os arquivos estão no formato XLSX correto e não estão corrompidos. Verifique também se a coluna 'PROCESSO' existe em ambas.")
+        st.warning("Verifique se os arquivos estão corretos e possuem a coluna 'PROCESSO'.")
