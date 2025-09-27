@@ -22,7 +22,7 @@ def to_excel(df):
 
 # --- Função para notificar n8n ---
 def notificar_n8n(nome_arquivo, qtd_processos):
-    url = "https://SEU_N8N_DOMAIN/webhook/streamlit-botao"  # 🔹 altere para o seu endpoint do n8n
+    url = "http://localhost:5678/webhook-test/html/body/div/div[1]/div[1]/div/div/div/section[2]/div[1]/div/div/div[12]/div/button"  # 🔹 altere para o seu endpoint do n8n
     payload = {
         "mensagem": "Planilha final baixada no site",
         "arquivo": nome_arquivo,
